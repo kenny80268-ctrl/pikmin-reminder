@@ -1,31 +1,43 @@
-# 蘑菇守望 PWA v0.3
+# 蘑菇守望 PWA v0.4 — 外部資料源介接版
 
-一個可在 iPhone Safari、Android Chrome、Windows 瀏覽器使用的靜態 PWA。**無需 Mac、Flutter、Firebase、帳號或遊戲登入。**
+## 明確限制
+此專案**沒有辦法直接讀取 Pikmin Bloom 遊戲裡的附近蘑菇**。目前未找到官方授權的即時蘑菇 API。本專案不登入遊戲、不逆向遊戲協定、不自動存取未授權資料。
 
-## 功能
-- 多個蘑菇位置，各自設定 1～1440 分鐘倒數，預設 5 分鐘
-- 到期時，若網頁仍在前景，顯示提示、嘗試播放短聲與震動（依瀏覽器支援）
-- 手動記錄特殊蘑菇與好友邀請
-- localStorage 本機資料保存、JSON 匯出與匯入
-- HTTPS 下可註冊 Service Worker，加入主畫面，快取供離線開啟
+## 新功能
+- 「📡 雷達」頁：在頁面開啟期間每 60 秒抓取**由你自行提供且取得使用許可**的 HTTPS JSON 資料來源（需 CORS）。
+- 手機定位（可選）：僅在本機計算附近 600m、1.5km、3km、10km。
+- 特殊蘑菇分類與時間過期提示。
+- 新外部資料在頁面開啟時可顯示前景提醒；並非背景推播。
+- **示範模式使用完全虛構資料**，醒目標示避免誤以為真。
+- 保留 v0.3 本地倒數、回報、邀請、備份等功能與資料。
 
-## 在 iPhone 使用（最簡單）
-1. Windows 將**本資料夾內的所有檔案**（index.html、style.css、app.js、sw.js、manifest.webmanifest、icons 資料夾）上傳到 GitHub repository 根目錄。
-2. GitHub repository → Settings → Pages → Build and deployment → Deploy from a branch → main / (root) → Save。
-3. 待 GitHub Pages 產生 `https://帳號.github.io/專案名稱/` 網址，在 iPhone 的 Safari 開啟。
-4. 點「分享」→「加入主畫面」→「加入」，從主畫面啟動「蘑菇守望」。
-5. 輸入位置及預估分鐘數，使用「設定 → 測試提醒」測試畫面與聲音。iOS 必須允許使用者互動才能初始化聲音，靜音模式也可能影響提示。
+## JSON 規格
+提供 HTTPS 網址，回傳如下內容；`updatedAt` 必須是有效 ISO-8601 時間：
 
-## 在 Windows 本機測試
-在專案目錄執行 `python -m http.server 8000`，瀏覽器開啟 `http://localhost:8000`。本機 HTTP 網站的 Service Worker 支援因環境而異；正式測試請使用 HTTPS 的 GitHub Pages。
+```json
+{
+  "mushrooms": [
+    {
+      "id": "spot-001",
+      "name": "公園旁",
+      "type": "水晶",
+      "size": "巨大",
+      "category": "",
+      "special": true,
+      "lat": 24.15,
+      "lon": 120.64,
+      "updatedAt": "2026-11-07T00:00:00+08:00"
+    }
+  ]
+}
+```
 
-## 已知限制，請務必了解
-- **沒有可靠的 iPhone 背景倒數提醒。** 在 iOS，網站 JavaScript 計時器不能在 App 關閉/背景時保證觸發通知。iOS 16.4+ 加入主畫面的 PWA 可用 Web Push，但必須另外部署推播伺服器與訂閱、授權。此版沒有伺服器，所以**不具備背景推播**。
-- 這個 PWA 不會讀取《Pikmin Bloom》遊戲資料，不能自動偵測蘑菇，也不會自動讀取好友邀請通知。
-- 特殊蘑菇回報目前只有本機記錄，沒有社群共享。
-- 預設 5 分鐘是**可調整的估算**，不保證官方重生機制或位置固定。
-- 紀錄在當前瀏覽器的本機儲存空間，其他裝置不會自動同步。清理網站資料可能會清空紀錄。
-- 本工具與 Niantic / Pikmin Bloom 無官方關聯。
+伺服器需回應 `Access-Control-Allow-Origin` 允許本站網域或 `*`，且來源應確保有使用權與玩家資料隱私保障。
 
-## 專案結構
-`index.html` UI；`style.css` 介面；`app.js` 本機狀態、倒數及備份；`sw.js` 離線快取；`manifest.webmanifest` PWA 安裝設定；`icons/` 圖示。
+## 部署 GitHub Pages
+解壓縮 ZIP，直接將 `index.html`、`app.js`、`radar.js`、`style.css`、`sw.js`、`manifest.webmanifest`、`icons/` 等檔案上傳到現有 `pikmin-reminder` 專案根目錄並 Commit（相同檔名選覆蓋）。已設定的 `main / (root)` GitHub Pages 不需重新設定。若舊版仍顯示，關閉後重新開啟或清除站點快取。
+
+## 已知限制
+- PWA 在背景或鎖定螢幕後不能保證定時檢查、提醒或音效。真正 iOS 背景通知需要經授權的遠端資料 + 伺服器排程 + Web Push。
+- 外部來源不提供座標的資料不會出現；GPS 需使用者授權。
+- v0.4 並未串接任何第三方社群站台，也不會暗中抓取其資料。
