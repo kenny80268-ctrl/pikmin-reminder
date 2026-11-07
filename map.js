@@ -1,0 +1,45 @@
+// v0.5: Personal map + optional licensed external feed. No game data access.
+'use strict';
+(()=>{
+const byId=id=>document.getElementById(id);
+const storageKey='mushroom-watch-map-v05';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rad=Math.PI/180;
+const distance=(a,b,c,d)=>2*6371000*Math.asin(Math.min(1,Math.sqrt(Math.sin((c-a)*rad/2)**2+Math.cos(a*rad)*Math.cos(c*rad)*Math.sin((d-b)*rad/2)**2)));
+const validPoint=(o)=>o&&typeof o.id==='string'&&typeof o.name==='string'&&typeof o.type==='string'&&Number.isFinite(o.lat)&&Number.isFinite(o.lon)&&Math.abs(o.lat)<=90&&Math.abs(o.lon)<=180&&Number.isFinite(o.updatedAt);
+const now=()=>Date.now();
+const stamp=t=>new Date(t).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+const defaults={points:[],radius:600,filter:'all'};
+let state={...defaults}, myLocation=null, selectedCoord=null, leafletMap=null, markersLayer=null, circle=null, mapReady=false;
+try{const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); if(saved&&typeof saved==='object'){state.points=Array.isArray(saved.points)?saved.points.filter(validPoint).slice(0,1000):[];state.radius=[600,1500,3000,10000].includes(saved.radius)?saved.radius:600;state.filter=['all','active','recent'].includes(saved.filter)?saved.filter:'all';}}catch{}
+function persist(){try{localStorage.setItem(storageKey,JSON.stringify(state))}catch{status('儲存空間不足，請先匯出備份')}}
+function status(msg){byId('mapStatus').textContent=msg}
+function connected(){return window.mushRadarState?.mode==='external'?window.mushRadarState.rows:[]}
+function allRows(){return [...state.points.map(x=>({...x,origin:'local'})),...connected().map(x=>({...x,origin:'external',status:'active'}))]}
+function visibleRows(){const source=allRows();return source.map(p=>({...p,metres:myLocation?distance(myLocation.lat,myLocation.lon,p.lat,p.lon):null})).filter(p=>(!myLocation||p.metres<=state.radius)&&(state.filter==='all'||(state.filter==='active'&&p.status!=='gone')||(state.filter==='recent'&&p.updatedAt>now()-15*60000))).sort((a,b)=>(a.metres??Infinity)-(b.metres??Infinity)||b.updatedAt-a.updatedAt)}
+function showMap(){if(mapReady)return;const el=byId('mapCanvas');if(typeof window.L==='undefined'){el.innerHTML='<div class="empty">地圖圖層尚未載入（可能無法連線地圖服務）。下方文字清單仍可正常使用。</div>';return}
+  leafletMap=L.map(el,{zoomControl:true}).setView([23.8,121],7);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(leafletMap);
+  markersLayer=L.layerGroup().addTo(leafletMap);
+  leafletMap.on('click',e=>{selectedCoord={lat:e.latlng.lat,lon:e.latlng.lng};status('已選擇地圖座標 '+selectedCoord.lat.toFixed(5)+', '+selectedCoord.lon.toFixed(5)+'，點「記錄附近蘑菇」即可新增。')});
+  mapReady=true; setTimeout(()=>leafletMap.invalidateSize(),100);draw();
+}
+function icon(point){const gone=point.status==='gone',other=point.origin==='external',txt=other?'📡':gone?'⚪':'🍄';return L.divIcon({className:'map-marker',html:`<div class="map-pin ${gone?'gone':''} ${other?'external':''}">${txt}</div>`,iconSize:[32,32],iconAnchor:[16,16]})}
+function draw(){let rows=visibleRows();const list=byId('mapList');
+ list.innerHTML=rows.length?rows.map(p=>{const local=p.origin==='local';const ago=now()-p.updatedAt;const stale=ago>15*60000;return `<article class="entry map-item ${p.status==='gone'?'map-status-gone':''}"><div class="entry-top"><div><div class="entry-name">${local?'🍄':'📡'} ${esc(p.name)}</div><div class="entry-sub">${esc(p.size||'尺寸未記錄')} · ${esc(p.type)} · ${p.metres===null?'尚未定位':Math.round(p.metres)+' 公尺'}</div><div class="entry-sub">${esc(p.origin==='external'?'外部資料（非遊戲即時）':'本機記錄')} · ${p.status==='gone'?'已標記消失':stale?'⚠️ 超過 15 分鐘未確認':'最近確認'} · ${stamp(p.updatedAt)}</div></div><span class="pill ${p.status==='gone'?'done':''}">${p.status==='gone'?'已消失':local?'自建':'外部'}</span></div><div class="entry-actions"><button data-map-action="focus" data-map-id="${esc(p.id)}" data-map-origin="${p.origin}">地圖定位</button>${local?`<button data-map-action="confirm" data-map-id="${esc(p.id)}">確認仍在</button><button data-map-action="toggle" data-map-id="${esc(p.id)}">${p.status==='gone'?'標記重新出現':'標記消失'}</button><button data-map-action="remove" data-map-id="${esc(p.id)}" class="danger">刪除</button>`:''}<a href="https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=18/${p.lat}/${p.lon}" rel="noopener noreferrer" target="_blank">查看地點</a></div></article>`}).join(''):'<div class="empty">附近沒有「已記錄／已回報」且符合條件的蘑菇。<br>這不表示遊戲附近沒有蘑菇。</div>';
+ if(mapReady){markersLayer.clearLayers();for(const p of rows){const m=L.marker([p.lat,p.lon],{icon:icon(p)}).addTo(markersLayer);m.bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.type)} · ${esc(p.size||'尺寸未記錄')}<br>${p.origin==='local'?'個人記錄':'外部授權資料'}<br>${p.status==='gone'?'已標記消失':'最後確認：'+stamp(p.updatedAt)}`)}if(circle){leafletMap.removeLayer(circle);circle=null}if(myLocation){circle=L.circle([myLocation.lat,myLocation.lon],{radius:state.radius,color:'#377a57',fillColor:'#83c69a',fillOpacity:.07,weight:1.5}).addTo(leafletMap)}}
+}
+function locate(){if(!navigator.geolocation){status('瀏覽器不支援 GPS 定位');return}status('正在取得手機位置，請允許位置權限…');navigator.geolocation.getCurrentPosition(pos=>{myLocation={lat:pos.coords.latitude,lon:pos.coords.longitude};selectedCoord={...myLocation};status('定位成功 · 誤差約 '+Math.round(pos.coords.accuracy)+' 公尺。GPS 位置只存在記憶體，不會上傳到資料來源。');showMap();if(mapReady)leafletMap.setView([myLocation.lat,myLocation.lon],16);draw()},err=>{const reason={1:'定位權限被拒絕，請到 iPhone 網站設定開啟',2:'目前無法取得 GPS',3:'定位逾時'};status(reason[err.code]||err.message)}, {enableHighAccuracy:true,timeout:15000,maximumAge:30000})}
+function add(){const point=selectedCoord||myLocation;if(!point){status('請先點「定位」或在地圖上選位置');return}const name=prompt('蘑菇位置名稱（例如：公園入口）','');if(name===null)return;const n=name.trim();if(!n||n.length>80){status('請輸入 1～80 字的名稱');return}const type=prompt('蘑菇種類（例如：紅、藍、水晶、火、活動）','一般');if(type===null)return;const size=prompt('尺寸（例如：一般、大型、巨大）','一般');if(size===null)return;const id=(crypto.randomUUID?.()||String(Date.now())+'-'+Math.random().toString(36).slice(2));state.points.push({id,name:n,type:type.trim().slice(0,60)||'未分類',size:size.trim().slice(0,30)||'未記錄',lat:point.lat,lon:point.lon,updatedAt:now(),status:'active'});persist();draw();status('已新增本機蘑菇記錄。只儲存在目前裝置，不代表即時遊戲資料。')}
+function handleClick(e){const b=e.target.closest('[data-map-action]');if(!b)return;const id=b.dataset.mapId, act=b.dataset.mapAction;const found=state.points.find(x=>x.id===id);if(act==='focus'){const p=allRows().find(x=>x.id===id&&x.origin===b.dataset.mapOrigin);if(p){showMap();if(mapReady){leafletMap.setView([p.lat,p.lon],18);document.getElementById('mapCanvas').scrollIntoView({behavior:'smooth',block:'center'})}}return}if(!found)return;if(act==='remove'){if(!confirm('確定刪除這筆本機蘑菇記錄？'))return;state.points=state.points.filter(x=>x.id!==id)}else if(act==='confirm'){found.updatedAt=now();found.status='active'}else if(act==='toggle'){found.updatedAt=now();found.status=found.status==='gone'?'active':'gone'}persist();draw()}
+function importOwn(){byId('mapFile').click()}
+async function parseFile(e){const file=e.target.files?.[0];if(!file)return;try{if(file.size>2*1024*1024)throw Error('檔案太大，限制 2MB');const payload=JSON.parse(await file.text());const items=Array.isArray(payload)?payload:Array.isArray(payload.mushrooms)?payload.mushrooms:Array.isArray(payload.points)?payload.points:null;if(!items)throw Error('需為陣列或有 mushrooms/points 欄位');const cleaned=items.slice(0,1000).map((x,i)=>{if(!x||typeof x!=='object')return null;const lat=Number(x.lat),lon=Number(x.lon);const time=Number(x.updatedAt)||Date.parse(x.updatedAt)||now();const row={id:typeof x.id==='string'?x.id:'import-'+i+'-'+now(),name:String(x.name||'自備位置').slice(0,80),type:String(x.type||'未分類').slice(0,60),size:String(x.size||'未記錄').slice(0,30),lat,lon,updatedAt:time,status:x.status==='gone'?'gone':'active'};return validPoint(row)?row:null}).filter(Boolean);if(!cleaned.length)throw Error('沒有有效的座標資料');if(!confirm('要匯入 '+cleaned.length+' 筆本機位置嗎？匯入不會自動對外分享。'))return;const existing=new Set(state.points.map(x=>x.id));state.points.push(...cleaned.filter(x=>!existing.has(x.id)).slice(0,1000-state.points.length));persist();draw();status('已匯入 '+cleaned.length+' 筆資料（個人紀錄，非即時遊戲資料）')}catch(err){status('匯入失敗：'+err.message)}finally{e.target.value=''}}
+byId('mapRadius').value=String(state.radius);byId('mapFilter').value=state.filter;
+byId('mapRadius').onchange=e=>{state.radius=Number(e.target.value);persist();draw()};
+byId('mapFilter').onchange=e=>{state.filter=e.target.value;persist();draw()};
+byId('mapLocate').onclick=locate;byId('mapReload').onclick=draw;byId('mapAddSpot').onclick=add;byId('mapImport').onclick=importOwn;byId('mapFile').onchange=parseFile;byId('mapList').addEventListener('click',handleClick);
+window.addEventListener('mushradar:update',draw);
+document.querySelector('[data-tab="mapview"]').addEventListener('click',()=>{showMap();setTimeout(()=>{if(mapReady)leafletMap.invalidateSize()},180)});
+window.addEventListener('focus',draw);
+draw();
+})();
